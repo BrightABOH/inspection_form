@@ -29,6 +29,13 @@ st.markdown("""
     .photo-status { background-color: #E8F5E9; padding: 0.5rem; border-radius: 5px; margin: 0.5rem 0; }
     .current-step { background-color: #FFF3E0; padding: 1rem; border-radius: 5px; border-left: 5px solid #FF9800; margin: 1rem 0; }
     .info-box { background-color: #E3F2FD; padding: 1rem; border-radius: 5px; border-left: 5px solid #2196F3; margin: 1rem 0; }
+    .camera-buttons { display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+    .camera-btn { flex: 1; min-width: 120px; }
+    
+    @media (min-width: 768px) and (max-width: 1024px) {
+        .camera-buttons { gap: 15px; }
+        .stButton button { font-size: 1.1rem; padding: 0.75rem; }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -57,24 +64,28 @@ def validate_email(email):
         return True, "✓ Valid email format"
     return False, "❌ Invalid email address"
 
-def save_inspection_report(data, photos):
+def save_inspection_report(data, photos, email_sent=False):
     try:
         report_dir = Path("inspection_reports")
         report_dir.mkdir(exist_ok=True)
+        
+        data['email_sent'] = email_sent
+        data['email_timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if email_sent else None
         
         json_path = report_dir / f"{data['inspection_id']}.json"
         with open(json_path, 'w') as f:
             json.dump(data, f, indent=2)
         
-        photos_dir = report_dir / data['inspection_id']
-        photos_dir.mkdir(exist_ok=True)
-        
-        for photo_name, photo_data in photos.items():
-            if photo_data:
-                photo_data.seek(0)
-                photo_path = photos_dir / f"{photo_name}.jpg"
-                with open(photo_path, 'wb') as f:
-                    f.write(photo_data.read())
+        if email_sent:
+            photos_dir = report_dir / data['inspection_id']
+            photos_dir.mkdir(exist_ok=True)
+            
+            for photo_name, photo_data in photos.items():
+                if photo_data:
+                    photo_data.seek(0)
+                    photo_path = photos_dir / f"{photo_name}.jpg"
+                    with open(photo_path, 'wb') as f:
+                        f.write(photo_data.read())
         
         return True, "Report saved"
     except Exception as e:
@@ -90,6 +101,9 @@ def load_inspection_report(inspection_id):
         
         with open(json_path, 'r') as f:
             data = json.load(f)
+        
+        if not data.get('email_sent', False):
+            return None
         
         photos = {}
         photos_dir = report_dir / inspection_id
@@ -114,12 +128,14 @@ def get_recent_reports():
         for json_file in report_dir.glob("EPA-*.json"):
             with open(json_file, 'r') as f:
                 data = json.load(f)
-                reports.append({
-                    "id": data['inspection_id'],
-                    "timestamp": data['timestamp'],
-                    "consignment": data.get('consignment', 'N/A'),
-                    "agent": data.get('agent_name', 'N/A')
-                })
+                if data.get('email_sent', False):
+                    reports.append({
+                        "id": data['inspection_id'],
+                        "timestamp": data['timestamp'],
+                        "consignment": data.get('consignment', 'N/A'),
+                        "agent": data.get('agent_name', 'N/A'),
+                        "email_timestamp": data.get('email_timestamp', 'N/A')
+                    })
         
         reports.sort(key=lambda x: x['timestamp'], reverse=True)
         return reports
@@ -188,6 +204,9 @@ def send_email_report(sender_email, data, photos):
                 <div class="field"><span class="label">Signature:</span> {data['reviewed_signature']}</div>
                 <div class="field"><span class="label">Date:</span> {data['reviewed_date']}</div>
             </div>
+            
+            <p><strong>Photos attached:</strong> Front, Left, Right, Back views</p>
+            <p><em>This is an automated report from EPA Inspection System</em></p>
         </body>
         </html>
         """
@@ -212,7 +231,6 @@ def send_email_report(sender_email, data, photos):
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.send_message(msg)
         
-        # Send copy to sender
         if sender_email and sender_email != RECIPIENT_EMAIL:
             try:
                 msg_copy = MIMEMultipart()
@@ -241,8 +259,8 @@ def send_email_report(sender_email, data, photos):
 if 'step' not in st.session_state:
     st.session_state.step = 'photos'
 
-if 'photo_step' not in st.session_state:
-    st.session_state.photo_step = 'front'
+if 'active_camera' not in st.session_state:
+    st.session_state.active_camera = None
 
 if 'photos' not in st.session_state:
     st.session_state.photos = {'front': None, 'left': None, 'right': None, 'back': None}
@@ -262,44 +280,63 @@ if 'show_success' not in st.session_state:
 if 'last_inspection_id' not in st.session_state:
     st.session_state.last_inspection_id = None
 
+if 'email_sent_status' not in st.session_state:
+    st.session_state.email_sent_status = False
+
 # ==================== SIDEBAR ====================
 st.sidebar.markdown("## 📋 Navigation")
 st.sidebar.markdown("---")
 
 if st.sidebar.button("📸 New Inspection", use_container_width=True):
     st.session_state.step = 'photos'
-    st.session_state.photo_step = 'front'
+    st.session_state.active_camera = None
     st.session_state.photos = {'front': None, 'left': None, 'right': None, 'back': None}
     st.session_state.form_data = {}
     st.session_state.show_success = False
     st.session_state.view_mode = None
+    st.session_state.email_sent_status = False
     st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("## 📊 Recent Reports")
+st.sidebar.markdown("## 📊 Successfully Emailed Reports")
+st.sidebar.caption("Showing only reports that were sent via email")
 
 recent_reports = get_recent_reports()
 if recent_reports:
-    for report in recent_reports[:5]:
-        if st.sidebar.button(f"📄 {report['id']}\n{report['timestamp'][:10]}", key=f"view_{report['id']}", use_container_width=True):
+    for report in recent_reports[:10]:
+        button_label = f"📧 {report['id']}\n{report['timestamp'][:10]}"
+        if st.sidebar.button(button_label, key=f"view_{report['id']}", use_container_width=True):
             report_data = load_inspection_report(report['id'])
             if report_data:
                 st.session_state.view_mode = 'view'
                 st.session_state.view_report_data = report_data
                 st.session_state.step = 'view'
                 st.rerun()
+    
+    st.sidebar.success(f"✅ {len(recent_reports)} reports emailed successfully")
 else:
-    st.sidebar.info("No recent reports found")
+    st.sidebar.info("No reports have been successfully emailed yet")
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"EPA Ghana System\n{datetime.now().year}")
 
 # ==================== HEADER ====================
-st.markdown('<div class="main-header"><h1> ENVIRONMENTAL PROTECTION AUTHORITY</h1><h2>STANDARD OPERATING PROCEDURE</h2><h3>CONSIGNMENT INSPECTION CHECKLIST</h3></div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1>🌿 ENVIRONMENTAL PROTECTION AUTHORITY</h1><h2>STANDARD OPERATING PROCEDURE</h2><h3>CONSIGNMENT INSPECTION CHECKLIST</h3></div>', unsafe_allow_html=True)
 st.markdown("---")
 
 today = date.today()
 st.info(f"📅 Today's Date: **{today.strftime('%A, %B %d, %Y')}**")
+
+st.markdown("""
+<div class="info-box">
+    <h4>📱 Camera Instructions for Tablets/iPads:</h4>
+    <p>• <strong>To switch camera:</strong> Look for the camera icon 🔄 in the camera viewer to switch between front and back cameras</p>
+    <p>• <strong>On iPad:</strong> Tap the camera viewer, then tap the camera switch icon in the bottom toolbar</p>
+    <p>• <strong>On Android tablets:</strong> Look for the camera flip icon usually at the top or bottom of the camera interface</p>
+    <p>• <strong>Tip:</strong> Use the BACK camera for better quality photos of equipment</p>
+    <p>• <strong>Reports are only saved if email is sent successfully</strong></p>
+</div>
+""", unsafe_allow_html=True)
 
 # ==================== VIEW MODE ====================
 if st.session_state.step == 'view' and st.session_state.view_report_data:
@@ -315,14 +352,14 @@ if st.session_state.step == 'view' and st.session_state.view_report_data:
         st.rerun()
     
     st.markdown(f"""
-    <div class="info-box">
+    <div class="success-box">
         <p><strong>Inspection ID:</strong> {report['inspection_id']}</p>
         <p><strong>Date/Time:</strong> {report['timestamp']}</p>
+        <p><strong>Email Sent:</strong> ✅ Yes at {report.get('email_timestamp', 'N/A')}</p>
         <p><strong>Status:</strong> 🔒 View Only Mode</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Display photos
     st.markdown("### 📸 Inspection Photos")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -340,7 +377,6 @@ if st.session_state.step == 'view' and st.session_state.view_report_data:
     
     st.markdown("---")
     
-    # Display Part I
     st.markdown("### PART I — PHYSICAL INSPECTION")
     col1, col2 = st.columns(2)
     with col1:
@@ -394,14 +430,26 @@ if st.session_state.step == 'view' and st.session_state.view_report_data:
 
 # ==================== SUCCESS SCREEN ====================
 if st.session_state.show_success:
-    st.markdown(f"""
-    <div class="success-box">
-        <h3>✅ INSPECTION REPORT COMPLETED!</h3>
-        <p><strong>Inspection ID:</strong> {st.session_state.last_inspection_id}</p>
-        <p><strong>Time:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.balloons()
+    if st.session_state.email_sent_status:
+        st.markdown(f"""
+        <div class="success-box">
+            <h3>✅ INSPECTION REPORT SENT SUCCESSFULLY!</h3>
+            <p><strong>Inspection ID:</strong> {st.session_state.last_inspection_id}</p>
+            <p><strong>Email sent to:</strong> {RECIPIENT_EMAIL}</p>
+            <p><strong>Time:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+            <p><strong>Status:</strong> Report saved and email confirmed</p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.balloons()  # Fixed: Now separate line, not in ternary
+    else:
+        st.markdown(f"""
+        <div class="error-box">
+            <h3>⚠️ EMAIL FAILED - REPORT NOT SAVED</h3>
+            <p><strong>Inspection ID:</strong> {st.session_state.last_inspection_id}</p>
+            <p><strong>Status:</strong> Email could not be sent</p>
+            <p>Please check your email configuration and try again.</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     with col1:
@@ -411,17 +459,16 @@ if st.session_state.show_success:
                     del st.session_state[key]
             st.rerun()
     with col2:
-        if st.button("📄 VIEW RECENT REPORTS", use_container_width=True):
+        if st.button("📄 VIEW EMAILED REPORTS", use_container_width=True):
             st.session_state.show_success = False
             st.rerun()
     
     st.stop()
 
-# ==================== PHOTO CAPTURE ====================
+# ==================== PHOTO CAPTURE WITH BUTTONS ====================
 if st.session_state.step == 'photos':
     st.markdown('<div class="section-header"><h2>📸 STEP 1: CAPTURE PHOTOS</h2></div>', unsafe_allow_html=True)
     
-    # Progress - Fixed: using separate containers instead of ternary
     st.markdown('<div class="photo-status">', unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -446,123 +493,124 @@ if st.session_state.step == 'photos':
             st.warning("⏳ Back View")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Capture sequence
-    if st.session_state.photo_step == 'front' and not st.session_state.photos['front']:
-        st.markdown('<div class="current-step">', unsafe_allow_html=True)
-        st.subheader("📷 Step 1 of 4: Capture FRONT View")
-        st.caption("Position your camera to capture the FRONT of the machine/container")
-        st.info("💡 Tip: Stand directly in front of the equipment")
-        front_photo = st.camera_input("Take photo of the FRONT view", key="front_cam")
-        if front_photo:
-            st.session_state.photos['front'] = front_photo
-            st.session_state.photo_step = 'left'
-            st.success("✅ Front captured! Moving to next...")
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    elif st.session_state.photo_step == 'left' and not st.session_state.photos['left']:
+    st.markdown("### Captured Photos So Far:")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
         if st.session_state.photos['front']:
-            st.image(st.session_state.photos['front'], caption="Front View (Captured)", width=200)
-        st.markdown('<div class="current-step">', unsafe_allow_html=True)
-        st.subheader("📷 Step 2 of 4: Capture LEFT View")
-        st.caption("Position your camera to capture the LEFT side of the machine/container")
-        st.info("💡 Tip: Stand on the left side of the equipment")
-        left_photo = st.camera_input("Take photo of the LEFT view", key="left_cam")
-        if left_photo:
-            st.session_state.photos['left'] = left_photo
-            st.session_state.photo_step = 'right'
-            st.success("✅ Left captured! Moving to next...")
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-        if st.button("← Retake Front View", key="retake_front_1"):
-            st.session_state.photos['front'] = None
-            st.session_state.photo_step = 'front'
-            st.rerun()
+            st.image(st.session_state.photos['front'], caption="✓ Front", width=120)
+        else:
+            st.markdown("📷 Front: Not captured")
+    with col2:
+        if st.session_state.photos['left']:
+            st.image(st.session_state.photos['left'], caption="✓ Left", width=120)
+        else:
+            st.markdown("📷 Left: Not captured")
+    with col3:
+        if st.session_state.photos['right']:
+            st.image(st.session_state.photos['right'], caption="✓ Right", width=120)
+        else:
+            st.markdown("📷 Right: Not captured")
+    with col4:
+        if st.session_state.photos['back']:
+            st.image(st.session_state.photos['back'], caption="✓ Back", width=120)
+        else:
+            st.markdown("📷 Back: Not captured")
     
-    elif st.session_state.photo_step == 'right' and not st.session_state.photos['right']:
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.session_state.photos['front']:
-                st.image(st.session_state.photos['front'], caption="Front", width=150)
-        with col2:
-            if st.session_state.photos['left']:
-                st.image(st.session_state.photos['left'], caption="Left", width=150)
-        st.markdown('<div class="current-step">', unsafe_allow_html=True)
-        st.subheader("📷 Step 3 of 4: Capture RIGHT View")
-        st.caption("Position your camera to capture the RIGHT side of the machine/container")
-        st.info("💡 Tip: Stand on the right side of the equipment")
-        right_photo = st.camera_input("Take photo of the RIGHT view", key="right_cam")
-        if right_photo:
-            st.session_state.photos['right'] = right_photo
-            st.session_state.photo_step = 'back'
-            st.success("✅ Right captured! Moving to final...")
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("← Retake Front", key="retake_front_2"):
-                st.session_state.photos['front'] = None
-                st.session_state.photo_step = 'front'
+    st.markdown("---")
+    st.markdown("### Tap a button below to capture each view:")
+    
+    col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
+    
+    with col_btn1:
+        if not st.session_state.photos['front']:
+            if st.button("📷 Capture FRONT View", key="btn_front", use_container_width=True):
+                st.session_state.active_camera = 'front'
                 st.rerun()
-        with col2:
-            if st.button("← Retake Left", key="retake_left_1"):
-                st.session_state.photos['left'] = None
-                st.session_state.photo_step = 'left'
+        else:
+            if st.button("🔄 Retake FRONT View", key="retake_front_btn", use_container_width=True):
+                st.session_state.photos['front'] = None
+                st.session_state.active_camera = 'front'
                 st.rerun()
     
-    elif st.session_state.photo_step == 'back' and not st.session_state.photos['back']:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.session_state.photos['front']:
-                st.image(st.session_state.photos['front'], caption="Front", width=120)
-        with col2:
-            if st.session_state.photos['left']:
-                st.image(st.session_state.photos['left'], caption="Left", width=120)
-        with col3:
-            if st.session_state.photos['right']:
-                st.image(st.session_state.photos['right'], caption="Right", width=120)
-        st.markdown('<div class="current-step">', unsafe_allow_html=True)
-        st.subheader("📷 Step 4 of 4: Capture BACK View")
-        st.caption("Position your camera to capture the BACK of the machine/container")
-        st.info("💡 Tip: Stand directly behind the equipment")
-        back_photo = st.camera_input("Take photo of the BACK view", key="back_cam")
-        if back_photo:
-            st.session_state.photos['back'] = back_photo
-            st.success("✅ All photos captured successfully!")
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("← Retake Front", key="retake_front_3"):
-                st.session_state.photos['front'] = None
-                st.session_state.photo_step = 'front'
+    with col_btn2:
+        if not st.session_state.photos['left']:
+            if st.button("📷 Capture LEFT View", key="btn_left", use_container_width=True):
+                st.session_state.active_camera = 'left'
                 st.rerun()
-        with col2:
-            if st.button("← Retake Left", key="retake_left_2"):
+        else:
+            if st.button("🔄 Retake LEFT View", key="retake_left_btn", use_container_width=True):
                 st.session_state.photos['left'] = None
-                st.session_state.photo_step = 'left'
+                st.session_state.active_camera = 'left'
                 st.rerun()
-        with col3:
-            if st.button("← Retake Right", key="retake_right_1"):
+    
+    with col_btn3:
+        if not st.session_state.photos['right']:
+            if st.button("📷 Capture RIGHT View", key="btn_right", use_container_width=True):
+                st.session_state.active_camera = 'right'
+                st.rerun()
+        else:
+            if st.button("🔄 Retake RIGHT View", key="retake_right_btn", use_container_width=True):
                 st.session_state.photos['right'] = None
-                st.session_state.photo_step = 'right'
+                st.session_state.active_camera = 'right'
                 st.rerun()
     
-    # All photos captured
+    with col_btn4:
+        if not st.session_state.photos['back']:
+            if st.button("📷 Capture BACK View", key="btn_back", use_container_width=True):
+                st.session_state.active_camera = 'back'
+                st.rerun()
+        else:
+            if st.button("🔄 Retake BACK View", key="retake_back_btn", use_container_width=True):
+                st.session_state.photos['back'] = None
+                st.session_state.active_camera = 'back'
+                st.rerun()
+    
+    if st.session_state.active_camera:
+        st.markdown("---")
+        
+        view_names = {
+            'front': 'FRONT',
+            'left': 'LEFT',
+            'right': 'RIGHT',
+            'back': 'BACK'
+        }
+        
+        view_tips = {
+            'front': "Stand directly in front of the equipment",
+            'left': "Stand on the LEFT side of the equipment",
+            'right': "Stand on the RIGHT side of the equipment",
+            'back': "Stand directly behind the equipment"
+        }
+        
+        current_view = st.session_state.active_camera
+        st.markdown(f"""
+        <div class="current-step">
+            <h3>📷 Capturing {view_names[current_view]} View</h3>
+            <p><strong>Tip:</strong> {view_tips[current_view]}</p>
+            <p>💡 <strong>For Tablets/iPads:</strong> Look for the camera switch icon 🔄 in the camera viewer to switch between front and back cameras. The back camera gives better quality!</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        camera_photo = st.camera_input(
+            f"Take photo of the {view_names[current_view]} view",
+            key=f"camera_{current_view}"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("❌ Cancel", use_container_width=True):
+                st.session_state.active_camera = None
+                st.rerun()
+        
+        if camera_photo:
+            st.session_state.photos[current_view] = camera_photo
+            st.session_state.active_camera = None
+            st.success(f"✅ {view_names[current_view]} view captured successfully!")
+            st.rerun()
+    
     if all(st.session_state.photos.values()):
         st.markdown("---")
         st.success("### ✅ All 4 photos captured successfully!")
-        st.subheader("Captured Photos Preview:")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.image(st.session_state.photos['front'], caption="Front View", width=150)
-        with col2:
-            st.image(st.session_state.photos['left'], caption="Left View", width=150)
-        with col3:
-            st.image(st.session_state.photos['right'], caption="Right View", width=150)
-        with col4:
-            st.image(st.session_state.photos['back'], caption="Back View", width=150)
-        st.markdown("---")
         
         if st.button("📝 Continue to Inspection Details →", type="primary", use_container_width=True):
             st.session_state.step = 'details'
@@ -576,12 +624,11 @@ if st.session_state.step == 'details':
     <div class="info-box">
         <p>📧 <strong>Report will be sent to:</strong> {RECIPIENT_EMAIL}</p>
         <p>💡 You will receive a confirmation copy at your email address.</p>
-        <p>💾 Reports are automatically saved and can be viewed from the sidebar.</p>
+        <p>⚠️ <strong>IMPORTANT:</strong> Reports are ONLY saved if email is sent successfully!</p>
     </div>
     """, unsafe_allow_html=True)
     
     with st.form("inspection_form"):
-        # PART I
         st.markdown("### PART I — PHYSICAL INSPECTION (At the Terminal)")
         
         col1, col2 = st.columns(2)
@@ -604,7 +651,6 @@ if st.session_state.step == 'details':
         
         st.markdown("---")
         
-        # PART II
         st.markdown("### PART II — BILLING")
         st.markdown("#### TEMA PORT OFFICE BILLING FORM")
         
@@ -630,7 +676,6 @@ if st.session_state.step == 'details':
             with col_t3:
                 other_type = st.text_input("Others:", key="other")
         
-        # Fees
         st.markdown("### Fees")
         col_f1, col_f2 = st.columns(2)
         with col_f1:
@@ -650,7 +695,6 @@ if st.session_state.step == 'details':
         
         st.markdown("---")
         
-        # SIGNATURES
         st.markdown("### SIGNATURES")
         st.markdown(f"⚠️ **Date must be TODAY: {today.strftime('%Y-%m-%d')}**")
         
@@ -672,7 +716,6 @@ if st.session_state.step == 'details':
         
         st.markdown("---")
         
-        # EMAIL
         st.markdown("### 📧 YOUR CONTACT INFORMATION")
         st.caption("We'll send a confirmation copy to your email address")
         
@@ -683,11 +726,9 @@ if st.session_state.step == 'details':
             else:
                 st.error("❌ Invalid email address")
         
-        # Submit button
         submitted = st.form_submit_button("✅ SUBMIT & SEND INSPECTION REPORT", type="primary", use_container_width=True)
         
         if submitted:
-            # Validate all fields
             errors = []
             
             if not consignment:
@@ -731,7 +772,6 @@ if st.session_state.step == 'details':
                     st.error(f"❌ {error}")
                 st.markdown('</div>', unsafe_allow_html=True)
             else:
-                # Prepare consignment type text
                 consignment_type = ""
                 if is_mining:
                     consignment_type += "Mining "
@@ -742,7 +782,6 @@ if st.session_state.step == 'details':
                 if not consignment_type:
                     consignment_type = "Not specified"
                 
-                # Prepare data
                 inspection_id = f"EPA-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
                 inspection_data = {
                     "inspection_id": inspection_id,
@@ -776,27 +815,27 @@ if st.session_state.step == 'details':
                     "reviewed_date": str(reviewed_date)
                 }
                 
-                # Save and send
-                save_inspection_report(inspection_data, st.session_state.photos)
-                
                 with st.spinner(f"📧 Sending inspection report..."):
-                    success, message = send_email_report(sender_email, inspection_data, st.session_state.photos)
+                    email_success, email_message = send_email_report(sender_email, inspection_data, st.session_state.photos)
                     
-                    if success:
+                    if email_success:
+                        save_success, save_message = save_inspection_report(inspection_data, st.session_state.photos, email_sent=True)
+                        st.session_state.email_sent_status = True
                         st.session_state.last_inspection_id = inspection_id
                         st.session_state.show_success = True
                         st.session_state.step = 'success'
                         st.rerun()
                     else:
-                        st.error(f"❌ {message}")
-                        st.info("Please check your email configuration in .streamlit/secrets.toml")
+                        st.session_state.email_sent_status = False
+                        st.session_state.last_inspection_id = inspection_id
+                        st.session_state.show_success = True
+                        st.session_state.step = 'success'
+                        st.rerun()
     
-    # Back button to retake photos (outside the form)
     if st.button("← Back to Photo Capture", use_container_width=True):
         st.session_state.step = 'photos'
         st.rerun()
 
-# Footer
 st.markdown("---")
 st.markdown("*SOP Checklist for Internal Use Only*")
 st.caption(f"EPA Ghana - Consignment Inspection System | {datetime.now().year}")
