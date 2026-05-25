@@ -321,7 +321,7 @@ st.sidebar.markdown("---")
 st.sidebar.caption(f"EPA Ghana System\n{datetime.now().year}")
 
 # ==================== HEADER ====================
-st.markdown('<div class="main-header"><h1>🌿 ENVIRONMENTAL PROTECTION AUTHORITY</h1><h2>STANDARD OPERATING PROCEDURE</h2><h3>CONSIGNMENT INSPECTION CHECKLIST</h3></div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1> ENVIRONMENTAL PROTECTION AUTHORITY</h1><h2>STANDARD OPERATING PROCEDURE</h2><h3>CONSIGNMENT INSPECTION CHECKLIST</h3></div>', unsafe_allow_html=True)
 st.markdown("---")
 
 today = date.today()
