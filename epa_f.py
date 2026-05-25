@@ -327,16 +327,7 @@ st.markdown("---")
 today = date.today()
 st.info(f"📅 Today's Date: **{today.strftime('%A, %B %d, %Y')}**")
 
-st.markdown("""
-<div class="info-box">
-    <h4>📱 Camera Instructions for Tablets/iPads:</h4>
-    <p>• <strong>To switch camera:</strong> Look for the camera icon 🔄 in the camera viewer to switch between front and back cameras</p>
-    <p>• <strong>On iPad:</strong> Tap the camera viewer, then tap the camera switch icon in the bottom toolbar</p>
-    <p>• <strong>On Android tablets:</strong> Look for the camera flip icon usually at the top or bottom of the camera interface</p>
-    <p>• <strong>Tip:</strong> Use the BACK camera for better quality photos of equipment</p>
-    <p>• <strong>Reports are only saved if email is sent successfully</strong></p>
-</div>
-""", unsafe_allow_html=True)
+
 
 # ==================== VIEW MODE ====================
 if st.session_state.step == 'view' and st.session_state.view_report_data:
