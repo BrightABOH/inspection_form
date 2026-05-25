@@ -557,7 +557,7 @@ if st.session_state.step == 'photos':
     st.markdown("---")
     
     # Capture buttons section
-    st.markdown("### 🎯 Tap a button below to capture each view:")
+    st.markdown("### Tap a button below to capture each view:")
     st.caption("Camera will open in FULL SCREEN mode for better visibility")
     
     col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
