@@ -15,10 +15,11 @@ RECIPIENT_EMAIL = "sbrightaboh@gmail.com"
 st.set_page_config(
     page_title="EPA Consignment Inspection Checklist",
     page_icon="📋",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS
+# Custom CSS for fullscreen camera and better layout
 st.markdown("""
     <style>
     .main-header { background-color: #2E7D32; padding: 1rem; border-radius: 10px; color: white; text-align: center; }
@@ -32,11 +33,77 @@ st.markdown("""
     .camera-buttons { display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
     .camera-btn { flex: 1; min-width: 120px; }
     
+    /* Fullscreen camera styling */
+    .stCamera input {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        z-index: 9999 !important;
+        object-fit: cover !important;
+    }
+    
+    /* Camera container fullscreen */
+    .stCamera {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        z-index: 10000 !important;
+        background: black !important;
+    }
+    
+    /* Make camera preview fullscreen */
+    .stCamera video {
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: cover !important;
+    }
+    
+    /* Camera button styling for better visibility */
+    .stCamera button {
+        z-index: 10001 !important;
+        position: fixed !important;
+        bottom: 30px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+    }
+    
     @media (min-width: 768px) and (max-width: 1024px) {
         .camera-buttons { gap: 15px; }
         .stButton button { font-size: 1.1rem; padding: 0.75rem; }
     }
     </style>
+""", unsafe_allow_html=True)
+
+# JavaScript for fullscreen camera
+st.markdown("""
+    <script>
+    // Function to request fullscreen when camera is active
+    function requestFullscreen(element) {
+        if (element.requestFullscreen) {
+            element.requestFullscreen();
+        } else if (element.webkitRequestFullscreen) {
+            element.webkitRequestFullscreen();
+        } else if (element.msRequestFullscreen) {
+            element.msRequestFullscreen();
+        }
+    }
+    
+    // Listen for camera activation
+    const observer = new MutationObserver(function(mutations) {
+        const cameraElement = document.querySelector('.stCamera video');
+        if (cameraElement && !cameraElement.hasAttribute('data-fullscreen-enabled')) {
+            cameraElement.setAttribute('data-fullscreen-enabled', 'true');
+            // Request fullscreen when camera appears
+            requestFullscreen(document.documentElement);
+        }
+    });
+    
+    observer.observe(document.body, { childList: true, subtree: true });
+    </script>
 """, unsafe_allow_html=True)
 
 # ==================== HELPER FUNCTIONS ====================
@@ -431,7 +498,7 @@ if st.session_state.show_success:
             <p><strong>Status:</strong> Report saved and email confirmed</p>
         </div>
         """, unsafe_allow_html=True)
-        st.balloons()  # Fixed: Now separate line, not in ternary
+        st.balloons()
     else:
         st.markdown(f"""
         <div class="error-box">
@@ -457,9 +524,12 @@ if st.session_state.show_success:
     st.stop()
 
 # ==================== PHOTO CAPTURE WITH BUTTONS ====================
+
+# ==================== PHOTO CAPTURE WITH BUTTONS ====================
 if st.session_state.step == 'photos':
     st.markdown('<div class="section-header"><h2>📸 STEP 1: CAPTURE PHOTOS</h2></div>', unsafe_allow_html=True)
     
+    # Progress status at the top
     st.markdown('<div class="photo-status">', unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -484,31 +554,11 @@ if st.session_state.step == 'photos':
             st.warning("⏳ Back View")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    st.markdown("### Captured Photos So Far:")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        if st.session_state.photos['front']:
-            st.image(st.session_state.photos['front'], caption="✓ Front", width=120)
-        else:
-            st.markdown("📷 Front: Not captured")
-    with col2:
-        if st.session_state.photos['left']:
-            st.image(st.session_state.photos['left'], caption="✓ Left", width=120)
-        else:
-            st.markdown("📷 Left: Not captured")
-    with col3:
-        if st.session_state.photos['right']:
-            st.image(st.session_state.photos['right'], caption="✓ Right", width=120)
-        else:
-            st.markdown("📷 Right: Not captured")
-    with col4:
-        if st.session_state.photos['back']:
-            st.image(st.session_state.photos['back'], caption="✓ Back", width=120)
-        else:
-            st.markdown("📷 Back: Not captured")
-    
     st.markdown("---")
-    st.markdown("### Tap a button below to capture each view:")
+    
+    # Capture buttons section
+    st.markdown("### 🎯 Tap a button below to capture each view:")
+    st.caption("Camera will open in FULL SCREEN mode for better visibility")
     
     col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
     
@@ -556,9 +606,10 @@ if st.session_state.step == 'photos':
                 st.session_state.active_camera = 'back'
                 st.rerun()
     
+    st.markdown("---")
+    
+    # Camera input section - appears BETWEEN buttons and captured photos preview
     if st.session_state.active_camera:
-        st.markdown("---")
-        
         view_names = {
             'front': 'FRONT',
             'left': 'LEFT',
@@ -578,10 +629,13 @@ if st.session_state.step == 'photos':
         <div class="current-step">
             <h3>📷 Capturing {view_names[current_view]} View</h3>
             <p><strong>Tip:</strong> {view_tips[current_view]}</p>
-            <p>💡 <strong>For Tablets/iPads:</strong> Look for the camera switch icon 🔄 in the camera viewer to switch between front and back cameras. The back camera gives better quality!</p>
+            <p>💡 <strong>Camera is in FULL SCREEN mode</strong> - The camera will take up your entire screen for better visibility</p>
+            <p>💡 <strong>To switch cameras:</strong> Look for the camera switch icon 🔄 (usually at the bottom or top corner)</p>
+            <p>💡 <strong>To take photo:</strong> Tap the capture button at the bottom of the screen</p>
         </div>
         """, unsafe_allow_html=True)
         
+        # Camera input - this will open in full screen
         camera_photo = st.camera_input(
             f"Take photo of the {view_names[current_view]} view",
             key=f"camera_{current_view}"
@@ -598,9 +652,37 @@ if st.session_state.step == 'photos':
             st.session_state.active_camera = None
             st.success(f"✅ {view_names[current_view]} view captured successfully!")
             st.rerun()
-    
-    if all(st.session_state.photos.values()):
+        
         st.markdown("---")
+    
+    # Captured photos preview (appears AFTER camera, or directly after buttons if no active camera)
+    st.markdown("### 📷 Captured Photos So Far:")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.session_state.photos['front']:
+            st.image(st.session_state.photos['front'], caption="✓ Front", width=120)
+        else:
+            st.markdown("📷 Front: Not captured")
+    with col2:
+        if st.session_state.photos['left']:
+            st.image(st.session_state.photos['left'], caption="✓ Left", width=120)
+        else:
+            st.markdown("📷 Left: Not captured")
+    with col3:
+        if st.session_state.photos['right']:
+            st.image(st.session_state.photos['right'], caption="✓ Right", width=120)
+        else:
+            st.markdown("📷 Right: Not captured")
+    with col4:
+        if st.session_state.photos['back']:
+            st.image(st.session_state.photos['back'], caption="✓ Back", width=120)
+        else:
+            st.markdown("📷 Back: Not captured")
+    
+    st.markdown("---")
+    
+    # Continue button when all photos are captured
+    if all(st.session_state.photos.values()):
         st.success("### ✅ All 4 photos captured successfully!")
         
         if st.button("📝 Continue to Inspection Details →", type="primary", use_container_width=True):
